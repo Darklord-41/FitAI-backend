@@ -1,33 +1,21 @@
-const nodemailer = require('nodemailer')
+const { Resend } = require('resend')
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TODO: Set these in your .env file
-//   EMAIL_HOST=smtp.gmail.com
-//   EMAIL_PORT=587
-//   EMAIL_USER=your-gmail@gmail.com
-//   EMAIL_PASS=your-gmail-app-password   ← generate at https://myaccount.google.com/apppasswords
-//   EMAIL_FROM="FitAI <your-gmail@gmail.com>"
+// TODO: Set this in your .env file and in Render environment variables:
+//   RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
+//   Get your API key at https://resend.com → API Keys → Create Key
 // ─────────────────────────────────────────────────────────────────────────────
 
-const transporter = nodemailer.createTransport({
-  host:   process.env.EMAIL_HOST || 'smtp.gmail.com',
-  port:   Number(process.env.EMAIL_PORT) || 587,
-  secure: false, // true for port 465, false for 587 (STARTTLS)
-  auth: {
-    user: process.env.EMAIL_USER, // TODO: set EMAIL_USER in .env
-    pass: process.env.EMAIL_PASS, // TODO: set EMAIL_PASS in .env (Gmail App Password)
-  },
-})
+const resend = new Resend(process.env.RESEND_API_KEY)
 
-/**
- * Sends a 6-digit OTP to the user's email for verification.
- * @param {string} to      - Recipient email address
- * @param {string} otp     - Plain 6-digit OTP (do NOT store plain OTP in DB)
- * @param {string} name    - Recipient's first name
- */
+// NOTE: Until you verify a custom domain on Resend, you must use:
+//   from: 'onboarding@resend.dev'
+// After verifying your domain (e.g. fitai.com), change it to:
+//   from: 'FitAI <noreply@yourdomain.com>'
+
 exports.sendOtpEmail = async (to, otp, name) => {
-  const mailOptions = {
-    from:    process.env.EMAIL_FROM || `"FitAI" <${process.env.EMAIL_USER}>`,
+  await resend.emails.send({
+    from:    'FitAI <onboarding@resend.dev>',
     to,
     subject: 'Verify your FitAI account',
     html: `
@@ -40,17 +28,12 @@ exports.sendOtpEmail = async (to, otp, name) => {
         <p style="color:#6b7280;font-size:13px;">If you didn't create a FitAI account, you can safely ignore this email.</p>
       </div>
     `,
-  }
-
-  await transporter.sendMail(mailOptions)
+  })
 }
 
-/**
- * Sends a password-reset OTP email.
- */
 exports.sendPasswordResetEmail = async (to, otp, name) => {
-  const mailOptions = {
-    from:    process.env.EMAIL_FROM || `"FitAI" <${process.env.EMAIL_USER}>`,
+  await resend.emails.send({
+    from:    'FitAI <onboarding@resend.dev>',
     to,
     subject: 'Reset your FitAI password',
     html: `
@@ -63,7 +46,5 @@ exports.sendPasswordResetEmail = async (to, otp, name) => {
         <p style="color:#6b7280;font-size:13px;">If you did not request a password reset, ignore this email.</p>
       </div>
     `,
-  }
-
-  await transporter.sendMail(mailOptions)
+  })
 }
