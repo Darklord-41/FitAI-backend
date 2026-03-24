@@ -8,7 +8,7 @@ This is the core REST API backend for the FitAI application. It is built with No
 - **Database:** [MongoDB](https://www.mongodb.com/) & [Mongoose](https://mongoosejs.com/)
 - **Authentication & Security:** JWT (`jsonwebtoken`), `bcryptjs`, `cors`
 - **File Handling:** `multer` (for avatar and fitness data uploads)
-- **Email Services:** `nodemailer` (via Google OAuth2)
+- **Email Services:** Gmail REST API (via `googleapis` and OAuth2)
 - **AI Integration:** Python script execution (`model.py`)
 
 ## Project Structure
