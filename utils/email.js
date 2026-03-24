@@ -1,8 +1,7 @@
-const nodemailer = require('nodemailer');
 const { google } = require('googleapis');
 
 /**
- * Helper to send email via Gmail OAuth2 API
+ * Sends email using Gmail REST API (no SMTP - works on Render)
  */
 const sendEmail = async (to, subject, html) => {
   try {
@@ -16,33 +15,40 @@ const sendEmail = async (to, subject, html) => {
       refresh_token: process.env.GMAIL_REFRESH_TOKEN
     });
 
-    const accessTokenResponse = await oauth2Client.getAccessToken();
-    const accessToken = accessTokenResponse.token;
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
-    const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        type: 'OAuth2',
-        user: process.env.GMAIL_USER,
-        clientId: process.env.GMAIL_CLIENT_ID,
-        clientSecret: process.env.GMAIL_CLIENT_SECRET,
-        refreshToken: process.env.GMAIL_REFRESH_TOKEN,
-        accessToken: accessToken
+    // Construct raw email in RFC 2822 format
+    const emailLines = [
+      `From: "FitAI" <${process.env.GMAIL_USER}>`,
+      `To: ${to}`,
+      `Subject: ${subject}`,
+      'MIME-Version: 1.0',
+      'Content-Type: text/html; charset=UTF-8',
+      '',
+      html
+    ];
+
+    const rawEmail = emailLines.join('\n');
+
+    // Base64 encode (URL-safe)
+    const encodedEmail = Buffer.from(rawEmail)
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+
+    const result = await gmail.users.messages.send({
+      userId: 'me',
+      requestBody: {
+        raw: encodedEmail
       }
     });
 
-    const result = await transporter.sendMail({
-      from: `"FitAI" <${process.env.GMAIL_USER}>`,
-      to,
-      subject,
-      html
-    });
-
-    console.log('Email sent:', result.messageId);
+    console.log('Email sent, message ID:', result.data.id);
     return result;
 
   } catch (error) {
-    console.error('Email sending failed:', error);
+    console.error('Email sending failed:', error.message);
     throw error;
   }
 };
