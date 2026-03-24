@@ -1,28 +1,60 @@
-const SibApiV3Sdk = require('sib-api-v3-sdk')
+const nodemailer = require('nodemailer');
+const { google } = require('googleapis');
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TODO: Set this in your .env file and in Render environment variables:
-//   BREVO_API_KEY=your-brevo-api-key
-//   BREVO_SENDER_EMAIL=your-verified-sender@gmail.com  ← the email you signed up to Brevo with
-//   BREVO_SENDER_NAME=FitAI
-//   Get your API key at https://app.brevo.com → SMTP & API → API Keys
-// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * Helper to send email via Gmail OAuth2 API
+ */
+const sendEmail = async (to, subject, html) => {
+  try {
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GMAIL_CLIENT_ID,
+      process.env.GMAIL_CLIENT_SECRET,
+      'https://developers.google.com/oauthplayground'
+    );
 
-const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi()
-apiInstance.authentications['apiKey'].apiKey = process.env.BREVO_API_KEY
+    oauth2Client.setCredentials({
+      refresh_token: process.env.GMAIL_REFRESH_TOKEN
+    });
 
-const sender = {
-  email: process.env.BREVO_SENDER_EMAIL,
-  name:  process.env.BREVO_SENDER_NAME || 'FitAI',
-}
+    const accessTokenResponse = await oauth2Client.getAccessToken();
+    const accessToken = accessTokenResponse.token;
 
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        type: 'OAuth2',
+        user: process.env.GMAIL_USER,
+        clientId: process.env.GMAIL_CLIENT_ID,
+        clientSecret: process.env.GMAIL_CLIENT_SECRET,
+        refreshToken: process.env.GMAIL_REFRESH_TOKEN,
+        accessToken: accessToken
+      }
+    });
+
+    const result = await transporter.sendMail({
+      from: `"FitAI" <${process.env.GMAIL_USER}>`,
+      to,
+      subject,
+      html
+    });
+
+    console.log('Email sent:', result.messageId);
+    return result;
+
+  } catch (error) {
+    console.error('Email sending failed:', error);
+    throw error;
+  }
+};
+
+/**
+ * Sends a 6-digit OTP to the user's email for verification.
+ * @param {string} to      - Recipient email address
+ * @param {string} otp     - Plain 6-digit OTP (do NOT store plain OTP in DB)
+ * @param {string} name    - Recipient's first name
+ */
 exports.sendOtpEmail = async (to, otp, name) => {
-  const sendSmtpEmail = new SibApiV3Sdk.SendSmtpEmail()
-
-  sendSmtpEmail.sender  = sender
-  sendSmtpEmail.to      = [{ email: to, name }]
-  sendSmtpEmail.subject = 'Verify your FitAI account'
-  sendSmtpEmail.htmlContent = `
+  const html = `
     <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:32px;border:1px solid #e5e7eb;border-radius:12px;">
       <h2 style="color:#7c3aed;margin-bottom:8px;">Welcome to FitAI, ${name}! 💪</h2>
       <p style="color:#374151;">Use the OTP below to verify your email address. It expires in <strong>10 minutes</strong>.</p>
@@ -31,18 +63,16 @@ exports.sendOtpEmail = async (to, otp, name) => {
       </div>
       <p style="color:#6b7280;font-size:13px;">If you didn't create a FitAI account, you can safely ignore this email.</p>
     </div>
-  `
+  `;
 
-  await apiInstance.sendTransacEmail(sendSmtpEmail)
-}
+  await sendEmail(to, 'Verify your FitAI account', html);
+};
 
+/**
+ * Sends a password-reset OTP email.
+ */
 exports.sendPasswordResetEmail = async (to, otp, name) => {
-  const sendSmtpEmail = new SibApiV3Sdk.SendSmtpEmail()
-
-  sendSmtpEmail.sender  = sender
-  sendSmtpEmail.to      = [{ email: to, name }]
-  sendSmtpEmail.subject = 'Reset your FitAI password'
-  sendSmtpEmail.htmlContent = `
+  const html = `
     <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:32px;border:1px solid #e5e7eb;border-radius:12px;">
       <h2 style="color:#7c3aed;">Password Reset Request</h2>
       <p style="color:#374151;">Hi ${name}, use the OTP below to reset your password. It expires in <strong>10 minutes</strong>.</p>
@@ -51,7 +81,7 @@ exports.sendPasswordResetEmail = async (to, otp, name) => {
       </div>
       <p style="color:#6b7280;font-size:13px;">If you did not request a password reset, ignore this email.</p>
     </div>
-  `
+  `;
 
-  await apiInstance.sendTransacEmail(sendSmtpEmail)
-}
+  await sendEmail(to, 'Reset your FitAI password', html);
+};

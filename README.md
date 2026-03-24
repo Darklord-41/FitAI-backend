@@ -8,7 +8,7 @@ This is the core REST API backend for the FitAI application. It is built with No
 - **Database:** [MongoDB](https://www.mongodb.com/) & [Mongoose](https://mongoosejs.com/)
 - **Authentication & Security:** JWT (`jsonwebtoken`), `bcryptjs`, `cors`
 - **File Handling:** `multer` (for avatar and fitness data uploads)
-- **Email Services:** `nodemailer` (via SMTP)
+- **Email Services:** `nodemailer` (via Google OAuth2)
 - **AI Integration:** Python script execution (`model.py`)
 
 ## Project Structure
@@ -47,7 +47,7 @@ Fill in the necessary credentials in `.env`:
 - `PORT`: The port your server runs on (default: `5000`)
 - `MONGO_URI`: Your MongoDB connection string (Local or Atlas)
 - `JWT_SECRET`: A secure, random string for token generation
-- `EMAIL_*`: Your SMTP credentials (e.g., Gmail App Password) for nodemailer
+- `GMAIL_*`: Your Google OAuth2 credentials (`GMAIL_USER`, `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`)
 - `CLIENT_URL`: The frontend URL to allow CORS (default: `http://localhost:5173`)
 
 **4. Install Python dependencies (for `model.py`):**
