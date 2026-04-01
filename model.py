@@ -2,6 +2,7 @@ import sys
 import json
 import numpy as np
 from sklearn.tree import DecisionTreeClassifier
+from sklearn.preprocessing import LabelEncoder
 
 # ─────────────────────────────────────────────
 #  Encodings
@@ -306,22 +307,79 @@ PLANS = {
     ],
 }
 
-# ─────────────────────────────────────────────
-#  Training data  [age, bmi, goal_enc, level_enc]
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+#  REAL ML: Meaningful training data where age & BMI genuinely affect the label
+#
+#  Rules encoded (domain knowledge → training signal):
+#
+#  INTENSITY MODIFIER  (drives level_enc adjustment):
+#    age >= 55           → prefer lower intensity  (level down 1 if possible)
+#    age >= 45           → slight caution flag
+#    bmi >= 35           → prefer lower intensity  (level down 1 if possible)
+#    bmi >= 30 + goal==build_muscle → keep original level (muscle OK with high BMI)
+#    bmi < 17.5 + goal==lose_fat    → nudge toward stay_fit (extreme underweight)
+#
+#  GOAL MODIFIER (drives goal_enc adjustment):
+#    bmi >= 30 + goal==build_muscle → often better served by lose_fat first
+#      (only for beginner; intermediate/advanced can handle it)
+#    bmi >= 35 + goal==endurance    → nudge to lose_fat (joint stress risk)
+#
+#  The final label is still plan_key(adjusted_goal, adjusted_level), so the
+#  Decision Tree learns a non-trivial mapping over all 4 features.
+# ─────────────────────────────────────────────────────────────────────────────
 
+def _adjusted_label(age, bmi, goal_enc, level_enc):
+    """
+    Returns the *most appropriate* plan label for this combination,
+    encoding real fitness domain rules so the tree learns something meaningful.
+    """
+    adj_goal  = goal_enc
+    adj_level = level_enc
+
+    # ── Age adjustments ────────────────────────────────────────────────────
+    if age >= 55:
+        adj_level = max(0, adj_level - 1)       # drop one intensity tier
+    elif age >= 45 and adj_level == 2:
+        adj_level = 1                            # cap at intermediate
+
+    # ── BMI-driven intensity adjustments ──────────────────────────────────
+    if bmi >= 35:
+        adj_level = max(0, adj_level - 1)        # obese class II → lower intensity
+    elif bmi >= 30 and adj_level == 2:
+        adj_level = 1                            # obese class I → cap at intermediate
+
+    # ── BMI-driven goal adjustments ───────────────────────────────────────
+    # Very high BMI + muscle goal + beginner → redirect to lose_fat first
+    if bmi >= 32 and goal_enc == 0 and adj_level == 0:
+        adj_goal = 1                             # build_muscle beginner → lose_fat beginner
+
+    # Extreme BMI + endurance → too much joint stress, redirect to lose_fat
+    if bmi >= 35 and goal_enc == 3:
+        adj_goal = 1
+
+    # Underweight + lose_fat → redirect to stay_fit (dangerous to cut more)
+    if bmi < 17.5 and goal_enc == 1:
+        adj_goal = 2
+
+    return plan_key(adj_goal, adj_level)
+
+
+# Build training data with 5 age points × 8 BMI points × 4 goals × 3 levels
 rows = []
+ages  = [16, 22, 30, 38, 45, 52, 60, 68]
+bmis  = [16.0, 18.0, 20.5, 23.0, 26.5, 30.5, 33.0, 37.0]
+
 for goal_enc in range(4):
     for level_enc in range(3):
-        label = plan_key(goal_enc, level_enc)
-        for age in [18, 25, 32, 42, 55]:
-            for bmi in [18.5, 22.0, 26.0, 31.0]:
+        for age in ages:
+            for bmi in bmis:
+                label = _adjusted_label(age, bmi, goal_enc, level_enc)
                 rows.append(([age, bmi, goal_enc, level_enc], label))
 
-X_train = [r[0] for r in rows]
-y_train = [r[1] for r in rows]
+X_train = np.array([r[0] for r in rows], dtype=float)
+y_train = np.array([r[1] for r in rows], dtype=int)
 
-clf = DecisionTreeClassifier(max_depth=6, random_state=42)
+clf = DecisionTreeClassifier(max_depth=8, min_samples_leaf=2, random_state=42)
 clf.fit(X_train, y_train)
 
 # ─────────────────────────────────────────────
@@ -331,6 +389,31 @@ clf.fit(X_train, y_train)
 def compute_bmi(weight_kg, height_cm):
     h = height_cm / 100.0
     return round(weight_kg / h ** 2, 1)
+
+def bmi_category(bmi):
+    if bmi < 17.5: return "Severely Underweight"
+    if bmi < 18.5: return "Underweight"
+    if bmi < 25:   return "Normal"
+    if bmi < 30:   return "Overweight"
+    if bmi < 35:   return "Obese (Class I)"
+    return "Obese (Class II+)"
+
+def plan_metadata(label, goal_enc, level_enc, adj_goal, adj_level):
+    """Returns a human-readable note if the plan was adjusted from the request."""
+    GOAL_NAMES  = {0:"Build Muscle", 1:"Lose Fat", 2:"Stay Fit", 3:"Endurance"}
+    LEVEL_NAMES = {0:"Beginner", 1:"Intermediate", 2:"Advanced"}
+    notes = []
+    if adj_goal != goal_enc:
+        notes.append(
+            f"Goal adjusted from '{GOAL_NAMES[goal_enc]}' to '{GOAL_NAMES[adj_goal]}' "
+            f"based on your BMI — safer and more effective for your profile."
+        )
+    if adj_level != level_enc:
+        notes.append(
+            f"Intensity adjusted from '{LEVEL_NAMES[level_enc]}' to '{LEVEL_NAMES[adj_level]}' "
+            f"based on your age/BMI — reduces injury risk while maintaining progress."
+        )
+    return notes
 
 # ─────────────────────────────────────────────
 #  Main
@@ -356,23 +439,32 @@ def main():
         goal_enc  = GOAL_MAP[goal_str]
         level_enc = LEVEL_MAP[level_str]
 
-        label        = int(clf.predict([[age, bmi, goal_enc, level_enc]])[0])
+        # ML prediction — now age & BMI genuinely influence the output
+        label       = int(clf.predict([[age, bmi, goal_enc, level_enc]])[0])
         workout_data = PLANS[label]
 
-        bmi_cat = ("Underweight" if bmi < 18.5 else
-                   "Normal"      if bmi < 25   else
-                   "Overweight"  if bmi < 30   else "Obese")
+        # Decode what was actually assigned (for transparency notes)
+        adj_goal  = label // 3
+        adj_level = label %  3
+        notes     = plan_metadata(label, goal_enc, level_enc, adj_goal, adj_level)
+
+        GOAL_NAMES  = {0:"build_muscle", 1:"lose_fat", 2:"stay_fit", 3:"endurance"}
+        LEVEL_NAMES = {0:"beginner", 1:"intermediate", 2:"advanced"}
 
         output = {
             "success": True,
             "user_stats": {
-                "age":          age,
-                "weight":       weight,
-                "height":       height,
-                "bmi":          bmi,
-                "bmi_category": bmi_cat,
-                "goal":         goal_str,
-                "level":        level_str,
+                "age":             age,
+                "weight":          weight,
+                "height":          height,
+                "bmi":             bmi,
+                "bmi_category":    bmi_category(bmi),
+                "goal":            goal_str,
+                "level":           level_str,
+                "assigned_goal":   GOAL_NAMES[adj_goal],
+                "assigned_level":  LEVEL_NAMES[adj_level],
+                "plan_adjusted":   len(notes) > 0,
+                "adjustment_notes": notes,
             },
             "workoutData": workout_data,
         }
